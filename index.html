@@ -1,0 +1,2068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0" />
+  <title>Cannon Launch: Overdrive Ultra</title>
+  
+  <!-- CrazyGames HTML5 SDK -->
+  <script src="https://sdk.crazygames.com/crazygames-sdk-v1.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none; /* Prevents unwanted mobile scaling/scrolling gestures */
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: #020617;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      max-width: 960px;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border: 2px solid #1e293b;
+      border-radius: 16px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 40px rgba(56, 189, 248, 0.1);
+      overflow: hidden;
+      cursor: pointer;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #instructions {
+      margin-top: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #64748b;
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container">
+    <canvas id="gameCanvas" width="960" height="540"></canvas>
+  </div>
+  <div id="instructions">
+    [SPACE / CLICK] Launch & Boost | [S] Store | [D] Cheat Currencies | Mobile Touch Optimized
+  </div>
+
+  <script>
+    // ==========================================
+    // PORTAL SDK LIFECYCLE & AD MANAGEMENT
+    // ==========================================
+    const PortalSDK = {
+      init() {
+        if (window.CrazyGames && window.CrazyGames.SDK) {
+          try { window.CrazyGames.SDK.game.gameLoadingStart(); } catch (e) {}
+        }
+      },
+      happytime() {
+        if (window.CrazyGames && window.CrazyGames.SDK) {
+          try { window.CrazyGames.SDK.game.happytime(); } catch (e) {}
+        }
+      },
+      requestInterstitial(onComplete) {
+        if (window.CrazyGames && window.CrazyGames.SDK) {
+          isMuted = true;
+          window.CrazyGames.SDK.game.requestAd("midgame", {
+            adStarted: () => { isMuted = true; },
+            adFinished: () => { isMuted = false; if (onComplete) onComplete(); },
+            adError: () => { isMuted = false; if (onComplete) onComplete(); }
+          });
+        } else {
+          if (onComplete) onComplete();
+        }
+      },
+      requestRewarded(onSuccess) {
+        if (window.CrazyGames && window.CrazyGames.SDK) {
+          isMuted = true;
+          window.CrazyGames.SDK.game.requestAd("rewarded", {
+            adStarted: () => { isMuted = true; },
+            adFinished: () => { isMuted = false; onSuccess(); },
+            adError: () => { isMuted = false; }
+          });
+        } else {
+          onSuccess();
+        }
+      }
+    };
+
+    PortalSDK.init();
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // ==========================================
+    // SAFE STORAGE SYSTEM
+    // ==========================================
+    const Storage = {
+      get(key, fallback) {
+        try {
+          const val = localStorage.getItem(key);
+          return val !== null ? val : fallback;
+        } catch (e) {
+          return fallback;
+        }
+      },
+      set(key, val) {
+        try {
+          localStorage.setItem(key, val);
+        } catch (e) {}
+      }
+    };
+
+    let totalCoins = parseInt(Storage.get("cannon_coins", "0")) || 0;
+    let totalDiamonds = parseInt(Storage.get("cannon_diamonds", "0")) || 0;
+    let consumableBoosts = parseInt(Storage.get("cannon_consumable_boosts", "0")) || 0;
+    let totalDistanceTraveled = parseInt(Storage.get("cannon_total_distance", "0")) || 0;
+
+    let unlockedChars = [];
+    try {
+      unlockedChars = JSON.parse(Storage.get("cannon_unlocked_chars", '["cat"]'));
+    } catch(e) { unlockedChars = ["cat"]; }
+
+    let unlockedHats = [];
+    try {
+      unlockedHats = JSON.parse(Storage.get("cannon_unlocked_hats", '["none"]'));
+    } catch(e) { unlockedHats = ["none"]; }
+
+    let unlockedBiomes = [];
+    try {
+      unlockedBiomes = JSON.parse(Storage.get("cannon_unlocked_biomes", '["neon"]'));
+    } catch(e) { unlockedBiomes = ["neon"]; }
+
+    let upgrades = { power: 0, bounciness: 0 };
+    try {
+      upgrades = JSON.parse(Storage.get("cannon_upgrades", '{"power":0,"bounciness":0}'));
+    } catch(e) { upgrades = { power: 0, bounciness: 0 }; }
+
+    let selectedCharId = Storage.get("cannon_selected_char", "cat");
+    let equippedHatId = Storage.get("cannon_equipped_hat", "none");
+    let selectedBiomeId = Storage.get("cannon_selected_biome", "neon");
+
+    function saveEconomy() {
+      Storage.set("cannon_coins", totalCoins);
+      Storage.set("cannon_diamonds", totalDiamonds);
+      Storage.set("cannon_consumable_boosts", consumableBoosts);
+      Storage.set("cannon_total_distance", totalDistanceTraveled);
+      Storage.set("cannon_unlocked_chars", JSON.stringify(unlockedChars));
+      Storage.set("cannon_unlocked_hats", JSON.stringify(unlockedHats));
+      Storage.set("cannon_unlocked_biomes", JSON.stringify(unlockedBiomes));
+      Storage.set("cannon_upgrades", JSON.stringify(upgrades));
+      Storage.set("cannon_selected_char", selectedCharId);
+      Storage.set("cannon_selected_hat", equippedHatId);
+      Storage.set("cannon_selected_biome", selectedBiomeId);
+    }
+
+    function safeRoundRect(ctx, x, y, w, h, r) {
+      if (w <= 0 || h <= 0) return;
+      r = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    // ==========================================
+    // CRASH-PROOF AUDIO ENGINE
+    // ==========================================
+    let isMuted = Storage.get("cannon_muted", "false") === "true";
+
+    const AudioEngine = {
+      ctx: null,
+      init() {
+        try {
+          if (!this.ctx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) this.ctx = new AudioContext();
+          }
+          if (this.ctx && this.ctx.state === "suspended") {
+            this.ctx.resume().catch(() => {});
+          }
+        } catch (e) {}
+      },
+      vibrate(pattern) {
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          try { navigator.vibrate(pattern); } catch (e) {}
+        }
+      },
+      playTone(freq, type, duration, freqEnd = null) {
+        if (isMuted || !this.ctx) return;
+        try {
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, now);
+          if (freqEnd) {
+            osc.frequency.exponentialRampToValueAtTime(Math.max(10, freqEnd), now + duration);
+          }
+          gain.gain.setValueAtTime(0.3, now);
+          gain.gain.linearRampToValueAtTime(0.01, now + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + duration);
+        } catch (e) {}
+      }
+    };
+
+    // ==========================================
+    // 8 UNIQUE BIOMES
+    // ==========================================
+    const BIOMES = [
+      { id: "neon", name: "NEON CITY", requiredTotalDist: 0, skyTop: "#030712", skyBot: "#1e1b4b", turf: "#38bdf8" },
+      { id: "blossom", name: "BLOSSOM VALLEY", requiredTotalDist: 50000, skyTop: "#2e1065", skyBot: "#701a75", turf: "#f43f5e" },
+      { id: "thunder", name: "THUNDER CLOUDS", requiredTotalDist: 150000, skyTop: "#0f172a", skyBot: "#334155", turf: "#eab308" },
+      { id: "orbit", name: "DEEP ORBIT", requiredTotalDist: 350000, skyTop: "#000000", skyBot: "#020617", turf: "#a855f7" },
+      { id: "wasteland", name: "CYBER WASTELAND", requiredTotalDist: 700000, skyTop: "#064e3b", skyBot: "#022c22", turf: "#10b981" },
+      { id: "caverns", name: "CRYSTAL CAVERNS", requiredTotalDist: 1250000, skyTop: "#172554", skyBot: "#0f172a", turf: "#818cf8" },
+      { id: "inferno", name: "SOLAR INFERNO", requiredTotalDist: 2000000, skyTop: "#7c2d12", skyBot: "#431407", turf: "#f97316" },
+      { id: "void", name: "QUANTUM VOID", requiredTotalDist: 3500000, skyTop: "#311042", skyBot: "#13041a", turf: "#ec4899" }
+    ];
+
+    const CHARACTERS = [
+      {
+        id: "cat",
+        name: "CALICO CAT",
+        priceDiamonds: 0,
+        bodyColor: "#f97316",
+        bellyColor: "#ffedd5",
+        accent: "#ea580c",
+        drag: 0.9984,
+        bounce: 1.15,
+        dashPower: 20,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = "#ea580c";
+          ctx.beginPath();
+          ctx.moveTo(-r * 0.7, -r * 0.4);
+          ctx.lineTo(-r * 0.35, -r * 1.25);
+          ctx.lineTo(0, -r * 0.6);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(0, -r * 0.6);
+          ctx.lineTo(r * 0.35, -r * 1.25);
+          ctx.lineTo(r * 0.7, -r * 0.4);
+          ctx.fill();
+
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = this.bellyColor;
+          ctx.beginPath();
+          ctx.arc(0, r * 0.2, r * 0.6, 0, Math.PI);
+          ctx.fill();
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      },
+      {
+        id: "panda",
+        name: "GIANT PANDA",
+        priceDiamonds: 100,
+        bodyColor: "#f8fafc",
+        accent: "#0f172a",
+        drag: 0.9968,
+        bounce: 1.35,
+        dashPower: 16,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = "#0f172a";
+          ctx.beginPath();
+          ctx.arc(-r * 0.7, -r * 0.7, r * 0.35, 0, Math.PI * 2);
+          ctx.arc(r * 0.7, -r * 0.7, r * 0.35, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "#0f172a";
+          ctx.beginPath();
+          ctx.ellipse(r * 0.3, -r * 0.15, r * 0.25, r * 0.18, 0.3, 0, Math.PI * 2);
+          ctx.ellipse(r * 0.65, -r * 0.15, r * 0.25, r * 0.18, -0.3, 0, Math.PI * 2);
+          ctx.fill();
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      },
+      {
+        id: "frog",
+        name: "POISON FROG",
+        priceDiamonds: 250,
+        bodyColor: "#22c55e",
+        accent: "#16a34a",
+        drag: 0.9975,
+        bounce: 1.48,
+        dashPower: 19,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(-r * 0.35, -r * 0.7, r * 0.35, 0, Math.PI * 2);
+          ctx.arc(r * 0.35, -r * 0.7, r * 0.35, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      },
+      {
+        id: "bunny",
+        name: "MOON RABBIT",
+        priceDiamonds: 500,
+        bodyColor: "#f1f5f9",
+        accent: "#f472b6",
+        drag: 0.9978,
+        bounce: 1.45,
+        dashPower: 22,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.ellipse(-r * 0.2, -r * 1.1, r * 0.22, r * 0.55, -0.2, 0, Math.PI * 2);
+          ctx.ellipse(r * 0.2, -r * 1.1, r * 0.22, r * 0.55, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "#f472b6";
+          ctx.beginPath();
+          ctx.ellipse(-r * 0.2, -r * 1.1, r * 0.12, r * 0.4, -0.2, 0, Math.PI * 2);
+          ctx.ellipse(r * 0.2, -r * 1.1, r * 0.12, r * 0.4, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      },
+      {
+        id: "ninja",
+        name: "CYBER NINJA",
+        priceDiamonds: 850,
+        bodyColor: "#1e293b",
+        bellyColor: "#334155",
+        accent: "#38bdf8",
+        drag: 0.999,
+        bounce: 1.25,
+        dashPower: 26,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = "#38bdf8";
+          ctx.fillRect(-r * 0.8, -r * 0.2, r * 1.6, 6);
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      },
+      {
+        id: "dog",
+        name: "NEON SHIBA",
+        priceDiamonds: 1200,
+        bodyColor: "#d97706",
+        bellyColor: "#fef3c7",
+        accent: "#f59e0b",
+        drag: 0.9982,
+        bounce: 1.3,
+        dashPower: 24,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = "#b45309";
+          ctx.beginPath();
+          ctx.moveTo(-r * 0.65, -r * 0.5);
+          ctx.lineTo(-r * 0.35, -r * 1.15);
+          ctx.lineTo(-r * 0.05, -r * 0.6);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(r * 0.05, -r * 0.6);
+          ctx.lineTo(r * 0.35, -r * 1.15);
+          ctx.lineTo(r * 0.65, -r * 0.5);
+          ctx.fill();
+
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      },
+      {
+        id: "phoenix",
+        name: "GOLDEN PHOENIX",
+        priceDiamonds: 1800,
+        bodyColor: "#eab308",
+        bellyColor: "#fef08a",
+        accent: "#ef4444",
+        drag: 0.9995,
+        bounce: 1.5,
+        dashPower: 28,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = "#ef4444";
+          ctx.beginPath();
+          ctx.moveTo(-r * 1.1, -r * 0.2);
+          ctx.lineTo(-r * 0.7, 0);
+          ctx.lineTo(-r * 1.1, r * 0.3);
+          ctx.fill();
+
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      },
+      {
+        id: "slime",
+        name: "GALACTIC SLIME",
+        priceDiamonds: 2500,
+        bodyColor: "#a855f7",
+        bellyColor: "#e9d5ff",
+        accent: "#c084fc",
+        drag: 0.9998,
+        bounce: 1.6,
+        dashPower: 30,
+        draw(ctx, r, mood, hat) {
+          ctx.fillStyle = this.bodyColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          drawExpression(ctx, r, mood);
+          drawHat(ctx, r, hat);
+        }
+      }
+    ];
+
+    const HATS = [
+      { id: "none", name: "None", priceCoins: 0 },
+      { id: "headband", name: "Ninja Band", priceCoins: 500 },
+      { id: "goggles", name: "Aviators", priceCoins: 1200 },
+      { id: "propeller", name: "Propeller", priceCoins: 2500 },
+      { id: "crown", name: "Gold Crown", priceCoins: 5000 },
+      { id: "visor", name: "Cyber Visor", priceCoins: 8500 },
+      { id: "pirate", name: "Pirate Hat", priceCoins: 12000 },
+      { id: "halo", name: "Angel Halo", priceCoins: 18000 },
+      { id: "horns", name: "Devil Horns", priceCoins: 25000 }
+    ];
+
+    const BOOST_UPGRADES = [
+      { id: "power", name: "Cannon Nitro (+15% Launch)", basePrice: 15, maxLevel: 5, desc: "Increases initial launch velocity." },
+      { id: "bounciness", name: "Super Spring (+20% Bounce)", basePrice: 20, maxLevel: 5, desc: "Preserves more momentum when bouncing." }
+    ];
+
+    function getSelectedChar() {
+      return CHARACTERS.find(c => c.id === selectedCharId) || CHARACTERS[0];
+    }
+
+    function getSelectedBiome() {
+      return BIOMES.find(b => b.id === selectedBiomeId) || BIOMES[0];
+    }
+
+    function drawExpression(ctx, r, mood) {
+      ctx.save();
+      if (mood === "panic") {
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(r * 0.3, -r * 0.15, 6, 0, Math.PI * 2);
+        ctx.arc(r * 0.65, -r * 0.15, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#0f172a";
+        ctx.beginPath();
+        ctx.arc(r * 0.3, -r * 0.15, 2, 0, Math.PI * 2);
+        ctx.arc(r * 0.65, -r * 0.15, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#dc2626";
+        ctx.beginPath();
+        ctx.arc(r * 0.48, r * 0.25, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (mood === "dizzy") {
+        ctx.strokeStyle = "#0f172a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(r * 0.3, -r * 0.1, 4, 0, Math.PI * 1.6);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(r * 0.65, -r * 0.1, 4, 0, Math.PI * 1.6);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(r * 0.35, r * 0.2);
+        ctx.lineTo(r * 0.6, r * 0.2);
+        ctx.stroke();
+      } else if (mood === "boost") {
+        ctx.strokeStyle = "#0f172a";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(r * 0.2, -r * 0.2);
+        ctx.lineTo(r * 0.38, -r * 0.1);
+        ctx.lineTo(r * 0.2, 0);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(r * 0.75, -r * 0.2);
+        ctx.lineTo(r * 0.58, -r * 0.1);
+        ctx.lineTo(r * 0.75, 0);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = "#0f172a";
+        ctx.beginPath();
+        ctx.arc(r * 0.3, -r * 0.15, 2.8, 0, Math.PI * 2);
+        ctx.arc(r * 0.65, -r * 0.15, 2.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(r * 0.32, -r * 0.18, 1, 0, Math.PI * 2);
+        ctx.arc(r * 0.67, -r * 0.18, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawHat(ctx, r, hatId) {
+      if (!hatId || hatId === "none") return;
+      ctx.save();
+      if (hatId === "headband") {
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.8, -r * 0.4);
+        ctx.lineTo(r * 0.8, -r * 0.4);
+        ctx.stroke();
+      } else if (hatId === "goggles") {
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(-r * 0.6, -r * 0.7, r * 1.2, 7);
+        ctx.fillStyle = "#38bdf8";
+        ctx.beginPath();
+        ctx.arc(-r * 0.25, -r * 0.65, 5, 0, Math.PI * 2);
+        ctx.arc(r * 0.25, -r * 0.65, 5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (hatId === "propeller") {
+        ctx.fillStyle = "#3b82f6";
+        ctx.beginPath();
+        ctx.arc(0, -r * 0.85, 7, Math.PI, 0);
+        ctx.fill();
+        ctx.fillStyle = "#f59e0b";
+        ctx.fillRect(-r * 0.6, -r * 1.1, r * 1.2, 4);
+      } else if (hatId === "crown") {
+        ctx.fillStyle = "#facc15";
+        ctx.strokeStyle = "#ca8a04";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.5, -r * 0.7);
+        ctx.lineTo(-r * 0.6, -r * 1.2);
+        ctx.lineTo(-r * 0.2, -r * 0.9);
+        ctx.lineTo(0, -r * 1.3);
+        ctx.lineTo(r * 0.2, -r * 0.9);
+        ctx.lineTo(r * 0.6, -r * 1.2);
+        ctx.lineTo(r * 0.5, -r * 0.7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (hatId === "visor") {
+        ctx.fillStyle = "#06b6d4";
+        ctx.fillRect(-r * 0.85, -r * 0.35, r * 1.7, 7);
+      } else if (hatId === "pirate") {
+        ctx.fillStyle = "#0f172a";
+        ctx.beginPath();
+        ctx.moveTo(-r * 1.1, -r * 0.4);
+        ctx.lineTo(0, -r * 1.3);
+        ctx.lineTo(r * 1.1, -r * 0.4);
+        ctx.closePath();
+        ctx.fill();
+      } else if (hatId === "halo") {
+        ctx.strokeStyle = "#facc15";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(0, -r * 1.25, r * 0.6, r * 0.2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (hatId === "horns") {
+        ctx.fillStyle = "#ef4444";
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.6, -r * 0.7);
+        ctx.lineTo(-r * 0.9, -r * 1.3);
+        ctx.lineTo(-r * 0.3, -r * 0.9);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(r * 0.6, -r * 0.7);
+        ctx.lineTo(r * 0.9, -r * 1.3);
+        ctx.lineTo(r * 0.3, -r * 0.9);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    const BASE_GROUND_Y = 460;
+    const GRAVITY = 0.38;
+
+    let gameState = "aiming";
+    let storeTab = "chars";
+    let shopScrollY = 0;
+    let isDraggingShop = false;
+    let dragStartY = 0;
+    let hasDragged = false;
+
+    let highScore = parseInt(Storage.get("cannon_highscore", "0")) || 0;
+    let ghostPoints = [];
+    try {
+      ghostPoints = JSON.parse(Storage.get("cannon_ghost", "[]"));
+    } catch (e) {
+      ghostPoints = [];
+    }
+
+    let recordedGhost = [];
+    let lastDistance = 0;
+    let coinsEarnedThisRun = 0;
+    let diamondsEarnedThisRun = 0;
+    let nextDiamondMilestone = 500;
+
+    let cameraX = 0;
+    let cameraY = 0;
+    let screenShake = 0;
+    let hitStop = 0;
+
+    let superMeter = 0;
+    let isSuperActive = false;
+    let superTimer = 0;
+
+    const cannon = {
+      x: 130,
+      y: BASE_GROUND_Y - 32,
+      angle: -0.45,
+      minAngle: -1.35,
+      maxAngle: -0.10,
+      angleDirection: -1,
+      angleSpeed: 0.024,
+      power: 0,
+      timer: 0,
+      cycleTime: 42
+    };
+
+    let player = null;
+    let obstacles = [];
+    let particles = [];
+    let mangaBadges = [];
+    let nextSpawnX = 500;
+
+    function getGroundHeight(x) {
+      if (x < 320) return BASE_GROUND_Y;
+      return BASE_GROUND_Y + Math.sin(x * 0.003) * 35 + Math.cos(x * 0.007) * 18;
+    }
+
+    function getGroundSlope(x) {
+      const step = 4;
+      return (getGroundHeight(x + step) - getGroundHeight(x - step)) / (step * 2);
+    }
+
+    function triggerLanding() {
+      if (gameState !== "flying") return;
+      gameState = "landed";
+      lastDistance = player ? player.distance : lastDistance;
+      highScore = Math.max(highScore, lastDistance);
+      Storage.set("cannon_highscore", highScore);
+
+      totalDistanceTraveled += lastDistance;
+
+      BIOMES.forEach(b => {
+        if (totalDistanceTraveled >= b.requiredTotalDist && !unlockedBiomes.includes(b.id)) {
+          unlockedBiomes.push(b.id);
+        }
+      });
+
+      PortalSDK.requestInterstitial();
+
+      if (lastDistance >= highScore && recordedGhost.length > 5) {
+        const sampleStep = Math.max(1, Math.floor(recordedGhost.length / 200));
+        ghostPoints = recordedGhost.filter((_, idx) => idx % sampleStep === 0);
+        Storage.set("cannon_ghost", JSON.stringify(ghostPoints));
+      }
+
+      if (player) {
+        player.vx = 0;
+        player.vy = 0;
+        player.skidding = true;
+        player.mood = "dizzy";
+      }
+      screenShake = 3;
+      saveEconomy();
+    }
+
+    function resetToAiming() {
+      AudioEngine.playTone(260, "sine", 0.2, 80);
+      gameState = "aiming";
+      cameraX = 0;
+      cameraY = 0;
+      screenShake = 5;
+
+      recordedGhost = [];
+      coinsEarnedThisRun = 0;
+      diamondsEarnedThisRun = 0;
+      nextDiamondMilestone = 500;
+
+      cannon.power = 0;
+      cannon.timer = 0;
+      cannon.angle = -0.3 - Math.random() * 0.8;
+      cannon.angleDirection = Math.random() > 0.5 ? 1 : -1;
+      cannon.angleSpeed = 0.02 + Math.random() * 0.012;
+      cannon.cycleTime = 36 + Math.floor(Math.random() * 16);
+
+      player = null;
+      particles = [];
+      mangaBadges = [];
+      obstacles = [];
+      superMeter = 0;
+      isSuperActive = false;
+
+      nextSpawnX = 550;
+      generateProceduralChunk(550, 3600);
+    }
+
+    function generateProceduralChunk(startX, endX) {
+      let x = startX;
+
+      while (x < endX) {
+        if (Math.random() < 0.45) {
+          x += 350 + Math.random() * 300;
+        } else {
+          const types = ["trampoline", "tnt", "ramp", "pool"];
+          const chosen = types[Math.floor(Math.random() * types.length)];
+          const curGroundY = getGroundHeight(x);
+
+          if (chosen === "trampoline") {
+            obstacles.push({ type: "trampoline", x, y: curGroundY - 14, w: 44, h: 14, color: "#f43f5e" });
+          } else if (chosen === "tnt") {
+            obstacles.push({ type: "tnt", x, y: curGroundY - 32, w: 32, h: 32, color: "#ef4444" });
+          } else if (chosen === "ramp") {
+            obstacles.push({ type: "ramp", x, y: curGroundY - 24, w: 42, h: 24, color: "#f59e0b" });
+          } else if (chosen === "pool") {
+            obstacles.push({ type: "pool", x, y: curGroundY - 16, w: 48, h: 16, color: "#0284c7" });
+          }
+          x += 260 + Math.random() * 240;
+        }
+      }
+
+      let airX = startX + 300;
+      while (airX < endX) {
+        const skyY = 80 + Math.random() * 190;
+        if (Math.random() > 0.5) {
+          obstacles.push({ type: "balloon", x: airX, y: skyY, r: 16, color: "#ec4899", popped: false });
+        } else {
+          obstacles.push({ type: "rocket_ring", x: airX, y: skyY, r: 24, color: "#38bdf8", active: true });
+        }
+        airX += 600 + Math.random() * 400;
+      }
+
+      let itemX = startX + 350;
+      while (itemX < endX - 200) {
+        const arcBaseY = 100 + Math.random() * 130;
+        for (let i = 0; i < 4; i++) {
+          obstacles.push({
+            type: "coin",
+            x: itemX + i * 32,
+            y: arcBaseY - Math.sin((i / 3) * Math.PI) * 22,
+            r: 9,
+            color: "#facc15",
+            collected: false
+          });
+        }
+        itemX += 550 + Math.random() * 350;
+      }
+
+      nextSpawnX = endX;
+    }
+
+    function launchPlayer() {
+      AudioEngine.init();
+      PortalSDK.happytime();
+      AudioEngine.playTone(160, "sawtooth", 0.35, 30);
+      AudioEngine.vibrate([40, 20, 60]);
+      gameState = "flying";
+
+      const extraPowerMultiplier = 1 + ((upgrades.power || 0) * 0.15);
+      const launchSpeed = (16 + cannon.power * 24) * extraPowerMultiplier;
+      const currentHero = getSelectedChar();
+
+      let startingBoosts = 2;
+      if (consumableBoosts > 0) {
+        consumableBoosts--;
+        startingBoosts += 1;
+        saveEconomy();
+      }
+
+      player = {
+        animal: currentHero,
+        hat: equippedHatId,
+        x: cannon.x + Math.cos(cannon.angle) * 62,
+        y: cannon.y + Math.sin(cannon.angle) * 62,
+        vx: Math.cos(cannon.angle) * launchSpeed,
+        vy: Math.sin(cannon.angle) * launchSpeed,
+        r: 16,
+        rotation: cannon.angle,
+        rotSpeed: 0.15,
+        scaleX: 1.3,
+        scaleY: 0.7,
+        distance: 0,
+        dashCharges: startingBoosts,
+        mood: "happy",
+        skidding: false,
+        flightTimer: 0,
+        stopTimer: 0,
+        lastStallX: cannon.x,
+        stallCheckInterval: 0,
+        trail: []
+      };
+
+      spawnMangaBadge(player.x, player.y - 30, "BOOM!");
+      createBurst(player.x, player.y, 40, currentHero.bodyColor);
+      screenShake = 8;
+    }
+
+    function executeDash() {
+      if (!player) return;
+
+      if (superMeter >= 100 && !isSuperActive) {
+        isSuperActive = true;
+        superTimer = 180;
+        superMeter = 0;
+        AudioEngine.playTone(300, "triangle", 0.3, 880);
+        player.vx += 25;
+        player.vy = -8;
+        spawnMangaBadge(player.x, player.y - 35, "ULTRA!");
+        screenShake = 12;
+        return;
+      }
+
+      if (player.dashCharges <= 0) return;
+      player.dashCharges--;
+      AudioEngine.playTone(500, "sawtooth", 0.16, 1400);
+
+      player.vx = Math.max(player.vx * 1.3, player.vx + player.animal.dashPower);
+      player.vy = -6;
+      player.scaleX = 1.4;
+      player.scaleY = 0.6;
+      player.mood = "boost";
+      screenShake = 6;
+      createBurst(player.x, player.y, 25, player.animal.accent);
+    }
+
+    function spawnMangaBadge(x, y, text) {
+      mangaBadges.push({
+        x, y,
+        text,
+        life: 25,
+        maxLife: 25,
+        scale: 0.4
+      });
+    }
+
+    function createBurst(x, y, count, color) {
+      for (let i = 0; i < count; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const spd = 2 + Math.random() * 6;
+        particles.push({
+          x, y,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd,
+          life: 18 + Math.random() * 12,
+          maxLife: 30,
+          color
+        });
+      }
+    }
+
+    function getMaxScrollY() {
+      let contentHeight = 0;
+      if (storeTab === "chars") contentHeight = CHARACTERS.length * 72 + 20;
+      else if (storeTab === "cosmetics") contentHeight = HATS.length * 60 + 20;
+      else if (storeTab === "biomes") contentHeight = BIOMES.length * 75 + 20;
+      else if (storeTab === "upgrades") contentHeight = (BOOST_UPGRADES.length + 1) * 75 + 20;
+      return Math.max(0, contentHeight - 315);
+    }
+
+    function handleScreenClick(px, py) {
+      AudioEngine.init();
+
+      if (px >= canvas.width - 64 && px <= canvas.width - 24 && py >= 24 && py <= 64) {
+        isMuted = !isMuted;
+        Storage.set("cannon_muted", isMuted.toString());
+        return;
+      }
+
+      if (gameState === "shop") {
+        const maxScroll = getMaxScrollY();
+        if (maxScroll > 0 && px >= 825 && px <= 850 && py >= 140 && py <= 455) {
+          const trackH = 315;
+          const ratio = Math.max(0, Math.min(1, (py - 140) / trackH));
+          shopScrollY = ratio * maxScroll;
+          return;
+        }
+
+        if (py >= 85 && py <= 122) {
+          if (px >= 130 && px <= 300) { storeTab = "chars"; shopScrollY = 0; return; }
+          if (px >= 315 && px <= 485) { storeTab = "cosmetics"; shopScrollY = 0; return; }
+          if (px >= 500 && px <= 670) { storeTab = "biomes"; shopScrollY = 0; return; }
+          if (px >= 685 && px <= 835) { storeTab = "upgrades"; shopScrollY = 0; return; }
+        }
+
+        // Close button
+        if (px >= canvas.width / 2 - 70 && px <= canvas.width / 2 + 70 && py >= 475 && py <= 510) {
+          gameState = "aiming";
+          return;
+        }
+
+        const adjustedPy = py + shopScrollY;
+
+        if (storeTab === "chars") {
+          CHARACTERS.forEach((ch, idx) => {
+            const rowY = 148 + idx * 72;
+            const btnX = canvas.width - 290;
+            if (py >= 140 && py <= 455 && adjustedPy >= rowY + 12 && adjustedPy <= rowY + 52 && px >= btnX && px <= btnX + 110) {
+              if (unlockedChars.includes(ch.id)) {
+                selectedCharId = ch.id;
+                saveEconomy();
+              } else if (totalDiamonds >= ch.priceDiamonds) {
+                totalDiamonds -= ch.priceDiamonds;
+                unlockedChars.push(ch.id);
+                selectedCharId = ch.id;
+                saveEconomy();
+                AudioEngine.playTone(1100, "triangle", 0.25, 1800);
+              }
+            }
+          });
+        }
+
+        if (storeTab === "cosmetics") {
+          HATS.forEach((ht, idx) => {
+            const rowY = 148 + idx * 60;
+            const btnX = canvas.width - 290;
+            if (py >= 140 && py <= 455 && adjustedPy >= rowY + 10 && adjustedPy <= rowY + 46 && px >= btnX && px <= btnX + 110) {
+              if (unlockedHats.includes(ht.id)) {
+                equippedHatId = ht.id;
+                saveEconomy();
+              } else if (totalCoins >= ht.priceCoins) {
+                totalCoins -= ht.priceCoins;
+                unlockedHats.push(ht.id);
+                equippedHatId = ht.id;
+                saveEconomy();
+                AudioEngine.playTone(987, "sine", 0.2, 1318);
+              }
+            }
+          });
+        }
+
+        if (storeTab === "biomes") {
+          BIOMES.forEach((b, idx) => {
+            const rowY = 150 + idx * 75;
+            const btnX = canvas.width - 290;
+            const isUnlocked = unlockedBiomes.includes(b.id);
+            const isSelected = selectedBiomeId === b.id;
+
+            if (py >= 140 && py <= 455 && adjustedPy >= rowY + 12 && adjustedPy <= rowY + 52 && px >= btnX && px <= btnX + 110) {
+              if (isSelected) return;
+              if (isUnlocked) {
+                selectedBiomeId = b.id;
+                saveEconomy();
+                AudioEngine.playTone(880, "sine", 0.2, 1200);
+              }
+            }
+          });
+        }
+
+        if (storeTab === "upgrades") {
+          BOOST_UPGRADES.forEach((up, idx) => {
+            const rowY = 150 + idx * 75;
+            const btnX = canvas.width - 290;
+            const curLevel = upgrades[up.id] || 0;
+            const price = up.basePrice * (curLevel + 1);
+
+            if (py >= 140 && py <= 455 && adjustedPy >= rowY + 12 && adjustedPy <= rowY + 52 && px >= btnX && px <= btnX + 110) {
+              if (curLevel < up.maxLevel && totalDiamonds >= price) {
+                totalDiamonds -= price;
+                upgrades[up.id] = curLevel + 1;
+                saveEconomy();
+                AudioEngine.playTone(600, "sine", 0.3, 1200);
+              }
+            }
+          });
+
+          // Rewarded Ad Button for Consumable Boost
+          const consumableRowY = 150 + BOOST_UPGRADES.length * 75;
+          const btnX = canvas.width - 290;
+          if (py >= 140 && py <= 455 && adjustedPy >= consumableRowY + 12 && adjustedPy <= consumableRowY + 52 && px >= btnX && px <= btnX + 110) {
+            PortalSDK.requestRewarded(() => {
+              consumableBoosts += 1;
+              saveEconomy();
+              AudioEngine.playTone(1200, "sine", 0.3, 1600);
+            });
+          }
+        }
+        return;
+      }
+
+      if (gameState === "aiming") {
+        if (px >= 280 && px <= 380 && py >= 24 && py <= 64) {
+          gameState = "shop";
+          storeTab = "chars";
+          shopScrollY = 0;
+          return;
+        }
+        launchPlayer();
+        return;
+      }
+
+      if (gameState === "flying") {
+        executeDash();
+        return;
+      }
+
+      if (gameState === "landed") {
+        resetToAiming();
+      }
+    }
+
+    // Natural Scroll Direction
+    window.addEventListener("wheel", (e) => {
+      if (gameState === "shop") {
+        shopScrollY = Math.max(0, Math.min(getMaxScrollY(), shopScrollY + e.deltaY * 0.6));
+      }
+    }, { passive: true });
+
+    canvas.addEventListener("pointerdown", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const px = (e.clientX - rect.left) * scaleX;
+      const py = (e.clientY - rect.top) * scaleY;
+
+      if (gameState === "shop" && px >= 140 && px <= 850 && py >= 140 && py <= 455) {
+        isDraggingShop = true;
+        dragStartY = py - shopScrollY;
+        hasDragged = false;
+      } else {
+        handleScreenClick(px, py);
+      }
+    });
+
+    canvas.addEventListener("pointermove", (e) => {
+      if (isDraggingShop && gameState === "shop") {
+        const rect = canvas.getBoundingClientRect();
+        const scaleY = canvas.height / rect.height;
+        const py = (e.clientY - rect.top) * scaleY;
+        const newScrollY = py - dragStartY;
+        if (Math.abs(newScrollY - shopScrollY) > 4) hasDragged = true;
+        shopScrollY = Math.max(0, Math.min(getMaxScrollY(), newScrollY));
+      }
+    });
+
+    canvas.addEventListener("pointerup", (e) => {
+      if (isDraggingShop && gameState === "shop" && !hasDragged) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const px = (e.clientX - rect.left) * scaleX;
+        const py = (e.clientY - rect.top) * scaleY;
+        handleScreenClick(px, py);
+      }
+      isDraggingShop = false;
+      hasDragged = false;
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (["Space", "ArrowUp", "ArrowDown", "KeyS", "KeyM", "KeyD"].includes(e.code)) {
+        e.preventDefault();
+      }
+      if (e.code === "Space") {
+        AudioEngine.init();
+        if (gameState === "aiming") launchPlayer();
+        else if (gameState === "flying") executeDash();
+        else if (gameState === "landed") resetToAiming();
+      }
+      if (e.code === "KeyS") {
+        if (gameState === "aiming") { gameState = "shop"; storeTab = "chars"; shopScrollY = 0; }
+        else if (gameState === "shop") gameState = "aiming";
+      }
+      if (e.code === "KeyM") {
+        isMuted = !isMuted;
+        Storage.set("cannon_muted", isMuted.toString());
+      }
+      // DEBUG CHEAT KEY [D]
+      if (e.code === "KeyD") {
+        totalCoins += 10000;
+        totalDiamonds += 500;
+        totalDistanceTraveled += 500000;
+        saveEconomy();
+        AudioEngine.playTone(1500, "triangle", 0.3, 2000);
+      }
+    });
+
+    function updatePhysics() {
+      if (hitStop > 0) {
+        hitStop--;
+        return;
+      }
+
+      if (screenShake > 0) screenShake *= 0.88;
+      if (screenShake < 0.05) screenShake = 0;
+
+      if (isSuperActive) {
+        superTimer--;
+        if (superTimer <= 0) isSuperActive = false;
+      }
+
+      if (gameState === "aiming") {
+        cannon.angle += cannon.angleDirection * cannon.angleSpeed;
+        if (cannon.angle <= cannon.minAngle) {
+          cannon.angle = cannon.minAngle;
+          cannon.angleDirection = 1;
+        } else if (cannon.angle >= cannon.maxAngle) {
+          cannon.angle = cannon.maxAngle;
+          cannon.angleDirection = -1;
+        }
+
+        cannon.timer = (cannon.timer + 1) % cannon.cycleTime;
+        const half = cannon.cycleTime / 2;
+        cannon.power = (cannon.timer < half ? cannon.timer : cannon.cycleTime - cannon.timer) / half;
+      }
+
+      if (gameState === "flying" && player) {
+        player.flightTimer++;
+
+        player.vx *= player.animal.drag;
+        player.vy += GRAVITY;
+        player.x += player.vx;
+        player.y += player.vy;
+        player.rotation += player.rotSpeed;
+        player.distance = Math.max(0, Math.floor((player.x - cannon.x) / 8));
+
+        if (player.flightTimer % 3 === 0) {
+          recordedGhost.push({ x: player.x, y: player.y });
+        }
+
+        if (player.distance >= nextDiamondMilestone) {
+          totalDiamonds += 1;
+          diamondsEarnedThisRun += 1;
+          nextDiamondMilestone += 500;
+          AudioEngine.playTone(1100, "triangle", 0.25, 1800);
+          spawnMangaBadge(player.x, player.y - 45, "+1 DIAMOND!");
+          saveEconomy();
+        }
+
+        if (player.vy > 9) player.mood = "panic";
+        else if (player.skidding) player.mood = "dizzy";
+        else if (player.vx > 18) player.mood = "boost";
+        else player.mood = "happy";
+
+        player.scaleX += (1 - player.scaleX) * 0.1;
+        player.scaleY += (1 - player.scaleY) * 0.1;
+
+        player.trail.push({ x: player.x, y: player.y });
+        if (player.trail.length > 12) player.trail.shift();
+
+        if (player.x + 2200 > nextSpawnX) {
+          generateProceduralChunk(nextSpawnX, nextSpawnX + 3000);
+        }
+
+        const curGroundY = getGroundHeight(player.x);
+        if (player.y + player.r >= curGroundY) {
+          player.y = curGroundY - player.r;
+          const slope = getGroundSlope(player.x);
+          const bounceUpgradeBonus = 1 + ((upgrades.bounciness || 0) * 0.2);
+
+          if (Math.abs(player.vy) > 2.5) {
+            AudioEngine.playTone(260, "sine", 0.22, 700);
+            player.vx += slope * 3.0;
+            player.vy = -player.vy * 0.5 * player.animal.bounce * bounceUpgradeBonus;
+            player.scaleX = 1.35;
+            player.scaleY = 0.65;
+            superMeter = Math.min(100, superMeter + 8);
+            createBurst(player.x, player.y + player.r, 4, "#64748b");
+          } else {
+            player.vy = 0;
+            player.vx *= 0.85;
+            player.skidding = true;
+          }
+
+          player.rotSpeed = player.vx * 0.04;
+        }
+
+        if (player.flightTimer > 20) {
+          const totalSpeed = Math.hypot(player.vx, player.vy);
+
+          if (totalSpeed < 0.8 || player.vx <= 0.1) {
+            player.stopTimer = (player.stopTimer || 0) + 1;
+          } else {
+            player.stopTimer = 0;
+          }
+
+          player.stallCheckInterval = (player.stallCheckInterval || 0) + 1;
+          if (player.stallCheckInterval >= 25) {
+            if (Math.abs(player.x - player.lastStallX) < 30) {
+              player.stopTimer = 999;
+            }
+            player.lastStallX = player.x;
+            player.stallCheckInterval = 0;
+          }
+
+          if (player.stopTimer >= 8) {
+            triggerLanding();
+            return;
+          }
+        }
+
+        for (let i = 0; i < obstacles.length; i++) {
+          const ob = obstacles[i];
+
+          if (ob.type === "coin") {
+            if (!ob.collected && Math.hypot(player.x - ob.x, player.y - ob.y) < player.r + ob.r) {
+              ob.collected = true;
+              totalCoins += 1;
+              coinsEarnedThisRun += 1;
+              AudioEngine.playTone(987, "sine", 0.2, 1318);
+              createBurst(ob.x, ob.y, 8, "#eab308");
+              saveEconomy();
+            }
+          } else if (ob.type === "balloon") {
+            if (!ob.popped && Math.hypot(player.x - ob.x, player.y - ob.y) < player.r + ob.r) {
+              ob.popped = true;
+              hitStop = 2;
+              AudioEngine.playTone(260, "sine", 0.22, 700);
+              player.vy = -Math.abs(player.vy * 1.3) - 7;
+              player.vx *= 1.15;
+              superMeter = Math.min(100, superMeter + 15);
+              spawnMangaBadge(ob.x, ob.y - 20, "POP!");
+              screenShake = 5;
+              createBurst(ob.x, ob.y, 18, "#ec4899");
+            }
+          } else if (ob.type === "rocket_ring") {
+            if (ob.active && Math.hypot(player.x - ob.x, player.y - ob.y) < player.r + ob.r) {
+              ob.active = false;
+              hitStop = 2;
+              AudioEngine.playTone(500, "sawtooth", 0.16, 1400);
+              player.vx += 18;
+              player.vy = -3;
+              superMeter = Math.min(100, superMeter + 25);
+              spawnMangaBadge(ob.x, ob.y - 20, "BOOST!");
+              screenShake = 6;
+              createBurst(ob.x, ob.y, 22, "#38bdf8");
+            }
+          } else {
+            if (
+              player.x + player.r > ob.x &&
+              player.x - player.r < ob.x + ob.w &&
+              player.y + player.r > ob.y &&
+              player.y - player.r < ob.y + ob.h
+            ) {
+              if (ob.type === "trampoline") {
+                hitStop = 2;
+                AudioEngine.playTone(260, "sine", 0.22, 700);
+                player.vy = -Math.abs(player.vy * 1.4) - 7;
+                spawnMangaBadge(ob.x + ob.w / 2, ob.y - 20, "SPRING!");
+                screenShake = 3;
+                createBurst(ob.x + ob.w / 2, ob.y, 10, "#f43f5e");
+              } else if (ob.type === "ramp") {
+                AudioEngine.playTone(260, "sine", 0.22, 700);
+                player.vx = Math.max(Math.abs(player.vx) * 1.4, 12);
+                player.vy = -Math.abs(player.vy * 0.45) - 5;
+                player.y = ob.y - player.r;
+                screenShake = 2;
+                createBurst(ob.x + ob.w / 2, ob.y, 10, "#f59e0b");
+              } else if (ob.type === "tnt") {
+                hitStop = 3;
+                AudioEngine.playTone(90, "square", 0.4, 15);
+                player.vy = -19;
+                player.vx += 9;
+                superMeter = Math.min(100, superMeter + 30);
+                spawnMangaBadge(ob.x + ob.w / 2, ob.y - 25, "SMASH!");
+                screenShake = 12;
+                createBurst(ob.x + ob.w / 2, ob.y, 35, "#ef4444");
+              } else if (ob.type === "pool") {
+                if (isSuperActive) {
+                  AudioEngine.playTone(260, "sine", 0.22, 700);
+                  player.vx += 12;
+                  spawnMangaBadge(ob.x + ob.w / 2, ob.y - 20, "CLEARED!");
+                  createBurst(ob.x + ob.w / 2, ob.y, 25, "#38bdf8");
+                } else {
+                  triggerLanding();
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (player) {
+        const targetCamX = player.x - 220;
+        const targetCamY = Math.min(0, player.y - 300);
+        cameraX += (targetCamX - cameraX) * 0.12;
+        cameraY += (targetCamY - cameraY) * 0.12;
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+
+      for (let i = mangaBadges.length - 1; i >= 0; i--) {
+        const b = mangaBadges[i];
+        b.y -= 1;
+        b.scale = Math.min(1.2, b.scale + 0.08);
+        b.life--;
+        if (b.life <= 0) mangaBadges.splice(i, 1);
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+      const shakeOffset = (Math.random() - 0.5) * screenShake * 4;
+      ctx.translate(-cameraX + shakeOffset, -cameraY + shakeOffset);
+
+      const activeBiome = getSelectedBiome();
+
+      // Sky
+      const grad = ctx.createLinearGradient(0, cameraY - 200, 0, cameraY + 600);
+      grad.addColorStop(0, activeBiome.skyTop);
+      grad.addColorStop(1, activeBiome.skyBot);
+      ctx.fillStyle = grad;
+      ctx.fillRect(cameraX - 100, cameraY - 200, canvas.width + 200, canvas.height + 400);
+
+      // Mountains
+      ctx.fillStyle = "#090d16";
+      ctx.beginPath();
+      ctx.moveTo(cameraX - 100, canvas.height + 200);
+      for (let mx = cameraX - 100; mx <= cameraX + canvas.width + 100; mx += 30) {
+        const my = BASE_GROUND_Y - 140 + Math.sin(mx * 0.0012) * 80 + Math.cos(mx * 0.002) * 50;
+        ctx.lineTo(mx, my);
+      }
+      ctx.lineTo(cameraX + canvas.width + 100, canvas.height + 200);
+      ctx.closePath();
+      ctx.fill();
+
+      // Cityscape Grid
+      const bldgWidth = 85;
+      const bldgStart = Math.floor((cameraX * 0.3) / bldgWidth) - 1;
+      for (let i = bldgStart; i < bldgStart + 16; i++) {
+        const bx = i * bldgWidth + (cameraX * 0.7);
+        const bh = 130 + Math.abs(Math.sin(i * 123)) * 140;
+        const by = BASE_GROUND_Y - bh + 15;
+
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(bx, by, bldgWidth - 6, bh);
+
+        ctx.fillStyle = "rgba(248, 250, 252, 0.08)";
+        for (let wy = by + 12; wy < BASE_GROUND_Y - 10; wy += 18) {
+          for (let wx = bx + 8; wx < bx + bldgWidth - 14; wx += 14) {
+            if ((i + wx + wy) % 5 === 0) {
+              ctx.fillStyle = activeBiome.turf;
+              ctx.globalAlpha = 0.3;
+              ctx.fillRect(wx, wy, 6, 8);
+              ctx.globalAlpha = 1;
+              ctx.fillStyle = "rgba(248, 250, 252, 0.08)";
+            } else {
+              ctx.fillRect(wx, wy, 6, 8);
+            }
+          }
+        }
+      }
+
+      // Ghost Line
+      if (ghostPoints.length > 2) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+        ctx.setLineDash([4, 6]);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(ghostPoints[0].x, ghostPoints[0].y);
+        for (let g = 1; g < ghostPoints.length; g++) {
+          ctx.lineTo(ghostPoints[g].x, ghostPoints[g].y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Rolling Terrain
+      const groundGrad = ctx.createLinearGradient(0, BASE_GROUND_Y - 50, 0, BASE_GROUND_Y + 140);
+      groundGrad.addColorStop(0, "#0f172a");
+      groundGrad.addColorStop(1, "#020617");
+      ctx.fillStyle = groundGrad;
+
+      ctx.beginPath();
+      const startDrawX = cameraX - 100;
+      const endDrawX = cameraX + canvas.width + 100;
+      ctx.moveTo(startDrawX, canvas.height + 200);
+      for (let tx = startDrawX; tx <= endDrawX; tx += 15) {
+        ctx.lineTo(tx, getGroundHeight(tx));
+      }
+      ctx.lineTo(endDrawX, canvas.height + 200);
+      ctx.closePath();
+      ctx.fill();
+
+      // Glowing Turf Line
+      ctx.save();
+      ctx.shadowColor = activeBiome.turf;
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = activeBiome.turf;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      for (let tx = startDrawX; tx <= endDrawX; tx += 15) {
+        if (tx === startDrawX) ctx.moveTo(tx, getGroundHeight(tx));
+        else ctx.lineTo(tx, getGroundHeight(tx));
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // Obstacles
+      for (let i = 0; i < obstacles.length; i++) {
+        const ob = obstacles[i];
+        if (ob.type === "coin") {
+          if (!ob.collected) {
+            ctx.fillStyle = "#facc15";
+            ctx.strokeStyle = "#ca8a04";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(ob.x, ob.y, ob.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          }
+        } else if (ob.type === "balloon") {
+          if (!ob.popped) {
+            ctx.save();
+            ctx.shadowColor = ob.color;
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = ob.color;
+            ctx.beginPath();
+            ctx.arc(ob.x, ob.y, ob.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            ctx.strokeStyle = "#94a3b8";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(ob.x, ob.y + ob.r);
+            ctx.lineTo(ob.x, ob.y + ob.r + 14);
+            ctx.stroke();
+          }
+        } else if (ob.type === "rocket_ring") {
+          if (ob.active) {
+            ctx.save();
+            ctx.shadowColor = "#38bdf8";
+            ctx.shadowBlur = 15;
+            ctx.strokeStyle = ob.color;
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.arc(ob.x, ob.y, ob.r, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = "rgba(56, 189, 248, 0.25)";
+            ctx.beginPath();
+            ctx.arc(ob.x, ob.y, ob.r * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        } else if (ob.type === "ramp") {
+          ctx.fillStyle = ob.color;
+          ctx.beginPath();
+          ctx.moveTo(ob.x, getGroundHeight(ob.x));
+          ctx.lineTo(ob.x + ob.w, ob.y);
+          ctx.lineTo(ob.x + ob.w, getGroundHeight(ob.x + ob.w));
+          ctx.closePath();
+          ctx.fill();
+        } else if (ob.type === "trampoline") {
+          ctx.fillStyle = "#1e293b";
+          ctx.fillRect(ob.x, ob.y + 6, ob.w, ob.h - 6);
+          ctx.save();
+          ctx.shadowColor = ob.color;
+          ctx.shadowBlur = 8;
+          ctx.fillStyle = ob.color;
+          ctx.fillRect(ob.x, ob.y, ob.w, 6);
+          ctx.restore();
+        } else if (ob.type === "tnt") {
+          ctx.fillStyle = ob.color;
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("TNT", ob.x + ob.w / 2, ob.y + 20);
+          ctx.textAlign = "left";
+        } else {
+          ctx.fillStyle = "rgba(2, 132, 199, 0.7)";
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = "#38bdf8";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+        }
+      }
+
+      // Cannon
+      if (gameState === "aiming") {
+        ctx.strokeStyle = "rgba(239, 68, 68, 0.4)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(cannon.x, cannon.y);
+        ctx.lineTo(cannon.x + Math.cos(cannon.angle) * 150, cannon.y + Math.sin(cannon.angle) * 150);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      ctx.save();
+      ctx.translate(cannon.x, cannon.y);
+      ctx.rotate(cannon.angle);
+
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, -15, 62, 30);
+      ctx.fillStyle = "#1e293b";
+      ctx.fillRect(8, -12, 44, 24);
+
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillRect(54, -17, 8, 34);
+
+      if (gameState === "aiming") {
+        ctx.save();
+        ctx.translate(14, 0);
+        ctx.scale(0.8, 0.8);
+        getSelectedChar().draw(ctx, 14, "happy", equippedHatId);
+        ctx.restore();
+      }
+      ctx.restore();
+
+      ctx.fillStyle = "#020617";
+      ctx.fillRect(cannon.x - 28, cannon.y + 10, 56, 18);
+
+      ctx.fillStyle = "#1e293b";
+      ctx.beginPath();
+      ctx.arc(cannon.x, cannon.y, 22, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#0284c7";
+      ctx.beginPath();
+      ctx.arc(cannon.x, cannon.y, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Player
+      if (player) {
+        if (player.trail.length > 2) {
+          ctx.strokeStyle = isSuperActive ? "#eab308" : player.animal.accent;
+          ctx.lineWidth = isSuperActive ? 7 : 4;
+          ctx.beginPath();
+          ctx.moveTo(player.trail[0].x, player.trail[0].y);
+          for (let i = 1; i < player.trail.length; i++) {
+            ctx.lineTo(player.trail[i].x, player.trail[i].y);
+          }
+          ctx.stroke();
+        }
+
+        ctx.save();
+        ctx.translate(player.x, player.y);
+        ctx.rotate(player.rotation);
+        ctx.scale(player.scaleX, player.scaleY);
+
+        if (isSuperActive) {
+          ctx.save();
+          ctx.shadowColor = "#eab308";
+          ctx.shadowBlur = 25;
+          ctx.fillStyle = "rgba(234, 179, 8, 0.35)";
+          ctx.beginPath();
+          ctx.arc(0, 0, player.r * 1.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        player.animal.draw(ctx, player.r, player.mood, player.hat);
+        ctx.restore();
+      }
+
+      // Manga Badges
+      mangaBadges.forEach(b => {
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.scale(b.scale, b.scale);
+        ctx.fillStyle = "#eab308";
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 4;
+        ctx.font = "900 24px -apple-system, sans-serif";
+        ctx.strokeText(b.text, 0, 0);
+        ctx.fillText(b.text, 0, 0);
+        ctx.restore();
+      });
+
+      // Particles
+      particles.forEach((p) => {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.life / p.maxLife;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+
+      ctx.restore();
+
+      // HUD
+      ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+      ctx.lineWidth = 1.5;
+      safeRoundRect(ctx, 24, 24, 240, 78, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 22px -apple-system, sans-serif";
+      if (player) {
+        ctx.fillText(`${player.distance} m`, 38, 54);
+        ctx.font = "bold 12px -apple-system, sans-serif";
+        ctx.fillStyle = player.animal.accent;
+        ctx.fillText(`${player.animal.name} (${activeBiome.name})`, 38, 74);
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillText(`AIR BOOSTS: ${player.dashCharges}`, 38, 92);
+      } else {
+        ctx.fillText(`READY`, 38, 54);
+        ctx.font = "bold 12px -apple-system, sans-serif";
+        const currentHero = getSelectedChar();
+        ctx.fillStyle = currentHero.accent;
+        ctx.fillText(`${currentHero.name} (${activeBiome.name})`, 38, 74);
+      }
+
+      if (gameState === "aiming") {
+        ctx.fillStyle = "#0284c7";
+        safeRoundRect(ctx, 280, 24, 100, 40, 10);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 14px -apple-system, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("SHOP [S]", 330, 48);
+        ctx.textAlign = "left";
+      }
+
+      ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+      safeRoundRect(ctx, canvas.width - 290, 24, 210, 40, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = "bold 14px -apple-system, sans-serif";
+      ctx.fillStyle = "#eab308";
+      ctx.fillText(`● ${totalCoins}`, canvas.width - 275, 48);
+
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillText(`◆ ${totalDiamonds}`, canvas.width - 175, 48);
+
+      ctx.fillStyle = isMuted ? "#ef4444" : "#1e293b";
+      safeRoundRect(ctx, canvas.width - 64, 24, 40, 40, 10);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 16px -apple-system, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(isMuted ? "✕" : "♪", canvas.width - 44, 48);
+      ctx.textAlign = "left";
+
+      // Super Meter
+      ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+      safeRoundRect(ctx, canvas.width / 2 - 90, 24, 180, 24, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      const superFillWidth = Math.max(0, 176 * (isSuperActive ? (superTimer / 180) : (superMeter / 100)));
+      if (superFillWidth > 0) {
+        ctx.fillStyle = isSuperActive ? "#eab308" : "#38bdf8";
+        safeRoundRect(ctx, canvas.width / 2 - 88, 26, superFillWidth, 20, 10);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "900 10px -apple-system, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(isSuperActive ? "ULTRA OVERDRIVE!" : `SUPER: ${Math.floor(superMeter)}%`, canvas.width / 2, 40);
+      ctx.textAlign = "left";
+
+      if (gameState === "aiming") {
+        ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+        safeRoundRect(ctx, 24, canvas.height - 44, 200, 20, 10);
+        ctx.fill();
+        ctx.stroke();
+
+        const powerBarW = Math.max(0, 196 * cannon.power);
+        if (powerBarW > 0) {
+          ctx.fillStyle = "#ef4444";
+          safeRoundRect(ctx, 26, canvas.height - 42, powerBarW, 16, 8);
+          ctx.fill();
+        }
+      }
+
+      if (gameState === "landed") {
+        ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
+        safeRoundRect(ctx, canvas.width / 2 - 220, canvas.height / 2 - 110, 440, 220, 16);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = "#f8fafc";
+        ctx.font = "900 26px -apple-system, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("RUN COMPLETE", canvas.width / 2, canvas.height / 2 - 60);
+
+        ctx.font = "bold 20px -apple-system, sans-serif";
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillText(`Distance: ${lastDistance} m`, canvas.width / 2, canvas.height / 2 - 25);
+
+        ctx.font = "bold 13px -apple-system, sans-serif";
+        ctx.fillStyle = "#e2e8f0";
+        ctx.fillText(`+${coinsEarnedThisRun} Coins (●)  |  +${diamondsEarnedThisRun} Diamonds (◆)`, canvas.width / 2, canvas.height / 2 + 5);
+
+        ctx.fillStyle = lastDistance >= highScore ? "#f59e0b" : "#94a3b8";
+        ctx.fillText(lastDistance >= highScore ? "NEW RECORD!" : `Best: ${highScore} m`, canvas.width / 2, canvas.height / 2 + 30);
+
+        ctx.font = "bold 13px -apple-system, sans-serif";
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillText("[ TAP SCREEN OR PRESS SPACE TO RETRY ]", canvas.width / 2, canvas.height / 2 + 75);
+        ctx.textAlign = "left";
+      }
+
+      // Shop Modal
+      if (gameState === "shop") {
+        ctx.fillStyle = "rgba(2, 6, 23, 0.96)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#f8fafc";
+        ctx.font = "900 26px -apple-system, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("OVERDRIVE SHOP", canvas.width / 2, 50);
+
+        const drawTabBtn = (tabKey, title, x, w) => {
+          ctx.fillStyle = storeTab === tabKey ? "#38bdf8" : "#1e293b";
+          safeRoundRect(ctx, x, 78, w, 36, 8);
+          ctx.fill();
+          ctx.fillStyle = storeTab === tabKey ? "#0f172a" : "#94a3b8";
+          ctx.font = "bold 11px -apple-system, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(title, x + w / 2, 101);
+        };
+
+        drawTabBtn("chars", "CHARACTERS (◆)", 130, 170);
+        drawTabBtn("cosmetics", "COSMETICS (●)", 315, 170);
+        drawTabBtn("biomes", "BIOMES (UNLOCK)", 500, 170);
+        drawTabBtn("upgrades", "BOOSTS (ADS)", 685, 150);
+
+        ctx.font = "bold 13px -apple-system, sans-serif";
+        ctx.fillStyle = "#eab308";
+        ctx.fillText(`● Coins: ${totalCoins}`, canvas.width / 2 - 100, 132);
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillText(`◆ Diamonds: ${totalDiamonds}`, canvas.width / 2 + 40, 132);
+
+        // Clip viewport for scrollable list rows
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(140, 140, 680, 315);
+        ctx.clip();
+
+        ctx.translate(0, -shopScrollY);
+
+        if (storeTab === "chars") {
+          CHARACTERS.forEach((ch, idx) => {
+            const rowY = 148 + idx * 72;
+            ctx.fillStyle = "#0f172a";
+            safeRoundRect(ctx, 160, rowY, 640, 60, 10);
+            ctx.fill();
+
+            ctx.save();
+            ctx.translate(200, rowY + 30);
+            ch.draw(ctx, 15, "happy", null);
+            ctx.restore();
+
+            ctx.fillStyle = "#f8fafc";
+            ctx.font = "bold 15px -apple-system, sans-serif";
+            ctx.textAlign = "left";
+            ctx.fillText(ch.name, 235, rowY + 35);
+
+            const isUnlocked = unlockedChars.includes(ch.id);
+            const isSelected = selectedCharId === ch.id;
+
+            const btnX = canvas.width - 290;
+            if (isSelected) {
+              ctx.fillStyle = "#22c55e";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 36, 8);
+              ctx.fill();
+              ctx.fillStyle = "#fff";
+              ctx.textAlign = "center";
+              ctx.fillText("EQUIPPED", btnX + 55, rowY + 34);
+            } else if (isUnlocked) {
+              ctx.fillStyle = "#38bdf8";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 36, 8);
+              ctx.fill();
+              ctx.fillStyle = "#0f172a";
+              ctx.textAlign = "center";
+              ctx.fillText("SELECT", btnX + 55, rowY + 34);
+            } else {
+              ctx.fillStyle = totalDiamonds >= ch.priceDiamonds ? "#38bdf8" : "#334155";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 36, 8);
+              ctx.fill();
+              ctx.fillStyle = "#fff";
+              ctx.textAlign = "center";
+              ctx.fillText(`◆ ${ch.priceDiamonds}`, btnX + 55, rowY + 34);
+            }
+          });
+        }
+
+        if (storeTab === "cosmetics") {
+          HATS.forEach((ht, idx) => {
+            const rowY = 148 + idx * 60;
+            ctx.fillStyle = "#0f172a";
+            safeRoundRect(ctx, 160, rowY, 640, 50, 10);
+            ctx.fill();
+
+            ctx.fillStyle = "#f8fafc";
+            ctx.font = "bold 15px -apple-system, sans-serif";
+            ctx.textAlign = "left";
+            ctx.fillText(ht.name, 210, rowY + 30);
+
+            const isUnlocked = unlockedHats.includes(ht.id);
+            const isEquipped = equippedHatId === ht.id;
+
+            const btnX = canvas.width - 290;
+            if (isEquipped) {
+              ctx.fillStyle = "#22c55e";
+              safeRoundRect(ctx, btnX, rowY + 8, 110, 34, 8);
+              ctx.fill();
+              ctx.fillStyle = "#fff";
+              ctx.textAlign = "center";
+              ctx.fillText("ON", btnX + 55, rowY + 29);
+            } else if (isUnlocked) {
+              ctx.fillStyle = "#38bdf8";
+              safeRoundRect(ctx, btnX, rowY + 8, 110, 34, 8);
+              ctx.fill();
+              ctx.fillStyle = "#0f172a";
+              ctx.textAlign = "center";
+              ctx.fillText("WEAR", btnX + 55, rowY + 29);
+            } else {
+              ctx.fillStyle = totalCoins >= ht.priceCoins ? "#eab308" : "#334155";
+              safeRoundRect(ctx, btnX, rowY + 8, 110, 34, 8);
+              ctx.fill();
+              ctx.fillStyle = totalCoins >= ht.priceCoins ? "#0f172a" : "#fff";
+              ctx.textAlign = "center";
+              ctx.fillText(`● ${ht.priceCoins}`, btnX + 55, rowY + 29);
+            }
+          });
+        }
+
+        if (storeTab === "biomes") {
+          BIOMES.forEach((b, idx) => {
+            const rowY = 150 + idx * 75;
+            ctx.fillStyle = "#0f172a";
+            safeRoundRect(ctx, 160, rowY, 640, 64, 10);
+            ctx.fill();
+
+            ctx.fillStyle = "#f8fafc";
+            ctx.font = "bold 14px -apple-system, sans-serif";
+            ctx.textAlign = "left";
+            ctx.fillText(b.name, 190, rowY + 26);
+
+            const isUnlocked = unlockedBiomes.includes(b.id);
+            const isSelected = selectedBiomeId === b.id;
+
+            ctx.font = "11px -apple-system, sans-serif";
+            ctx.fillStyle = isUnlocked ? "#38bdf8" : "#94a3b8";
+            ctx.fillText(isUnlocked ? "Unlocked" : `Requires ${b.requiredTotalDist.toLocaleString()} m total traveled`, 190, rowY + 45);
+
+            const btnX = canvas.width - 290;
+            if (isSelected) {
+              ctx.fillStyle = "#22c55e";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 38, 8);
+              ctx.fill();
+              ctx.fillStyle = "#fff";
+              ctx.textAlign = "center";
+              ctx.font = "bold 13px -apple-system, sans-serif";
+              ctx.fillText("ACTIVE", btnX + 55, rowY + 36);
+            } else if (isUnlocked) {
+              ctx.fillStyle = "#38bdf8";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 38, 8);
+              ctx.fill();
+              ctx.fillStyle = "#0f172a";
+              ctx.textAlign = "center";
+              ctx.font = "bold 13px -apple-system, sans-serif";
+              ctx.fillText("SELECT", btnX + 55, rowY + 36);
+            } else {
+              ctx.fillStyle = "#334155";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 38, 8);
+              ctx.fill();
+              ctx.fillStyle = "#94a3b8";
+              ctx.textAlign = "center";
+              ctx.font = "bold 12px -apple-system, sans-serif";
+              ctx.fillText("LOCKED", btnX + 55, rowY + 36);
+            }
+          });
+        }
+
+        if (storeTab === "upgrades") {
+          BOOST_UPGRADES.forEach((up, idx) => {
+            const rowY = 150 + idx * 75;
+            const curLevel = upgrades[up.id] || 0;
+            const isMax = curLevel >= up.maxLevel;
+            const price = up.basePrice * (curLevel + 1);
+
+            ctx.fillStyle = "#0f172a";
+            safeRoundRect(ctx, 160, rowY, 640, 64, 10);
+            ctx.fill();
+
+            ctx.fillStyle = "#f8fafc";
+            ctx.font = "bold 14px -apple-system, sans-serif";
+            ctx.textAlign = "left";
+            ctx.fillText(`${up.name} (Lv. ${curLevel}/${up.maxLevel})`, 190, rowY + 26);
+
+            ctx.font = "11px -apple-system, sans-serif";
+            ctx.fillStyle = "#94a3b8";
+            ctx.fillText(up.desc, 190, rowY + 45);
+
+            const btnX = canvas.width - 290;
+            if (isMax) {
+              ctx.fillStyle = "#22c55e";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 38, 8);
+              ctx.fill();
+              ctx.fillStyle = "#fff";
+              ctx.textAlign = "center";
+              ctx.font = "bold 13px -apple-system, sans-serif";
+              ctx.fillText("MAXED", btnX + 55, rowY + 36);
+            } else {
+              ctx.fillStyle = totalDiamonds >= price ? "#10b981" : "#334155";
+              safeRoundRect(ctx, btnX, rowY + 12, 110, 38, 8);
+              ctx.fill();
+              ctx.fillStyle = "#fff";
+              ctx.textAlign = "center";
+              ctx.font = "bold 13px -apple-system, sans-serif";
+              ctx.fillText(`◆ ${price}`, btnX + 55, rowY + 36);
+            }
+          });
+
+          // Rewarded Ad Consumable Boost Row
+          const consumableRowY = 150 + BOOST_UPGRADES.length * 75;
+          ctx.fillStyle = "#0f172a";
+          safeRoundRect(ctx, 160, consumableRowY, 640, 64, 10);
+          ctx.fill();
+
+          ctx.fillStyle = "#f8fafc";
+          ctx.font = "bold 14px -apple-system, sans-serif";
+          ctx.textAlign = "left";
+          ctx.fillText(`Extra Air Boost (Owned: ${consumableBoosts})`, 190, consumableRowY + 26);
+
+          ctx.font = "11px -apple-system, sans-serif";
+          ctx.fillStyle = "#94a3b8";
+          ctx.fillText("Watch a short ad to earn +1 extra mid-air boost for your next run.", 190, consumableRowY + 45);
+
+          const btnX = canvas.width - 290;
+          ctx.fillStyle = "#38bdf8";
+          safeRoundRect(ctx, btnX, consumableRowY + 12, 110, 38, 8);
+          ctx.fill();
+          ctx.fillStyle = "#0f172a";
+          ctx.textAlign = "center";
+          ctx.font = "bold 12px -apple-system, sans-serif";
+          ctx.fillText("WATCH AD", btnX + 55, consumableRowY + 36);
+        }
+
+        ctx.restore(); // Restore clip context
+
+        // Draw Interactive Scroll Bar Indicator on Right
+        const maxScroll = getMaxScrollY();
+        if (maxScroll > 0) {
+          const scrollBarTrackH = 315;
+          const contentH = maxScroll + scrollBarTrackH;
+          const thumbH = Math.max(40, (scrollBarTrackH / contentH) * scrollBarTrackH);
+          const thumbY = 140 + (shopScrollY / maxScroll) * (scrollBarTrackH - thumbH);
+
+          ctx.fillStyle = "rgba(56, 189, 248, 0.2)";
+          safeRoundRect(ctx, 835, 140, 6, scrollBarTrackH, 3);
+          ctx.fill();
+
+          ctx.fillStyle = "#38bdf8";
+          safeRoundRect(ctx, 835, thumbY, 6, thumbH, 3);
+          ctx.fill();
+        }
+
+        // Close Button
+        ctx.fillStyle = "#ef4444";
+        safeRoundRect(ctx, canvas.width / 2 - 70, 475, 140, 35, 10);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 14px -apple-system, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("CLOSE", canvas.width / 2, 497);
+        ctx.textAlign = "left";
+      }
+    }
+
+    let lastTime = performance.now();
+
+    function gameLoop(now) {
+      let dt = (now - lastTime) / 1000;
+      lastTime = now;
+      if (isNaN(dt) || dt <= 0 || dt > 0.1) dt = 1 / 60;
+
+      try {
+        updatePhysics();
+      } catch (e) {
+        resetToAiming();
+      }
+
+      try {
+        draw();
+      } catch (e) {}
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    resetToAiming();
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
