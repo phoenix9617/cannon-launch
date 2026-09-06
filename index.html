@@ -13,7 +13,7 @@
       box-sizing: border-box;
       user-select: none;
       -webkit-user-select: none;
-      touch-action: none; /* Prevents unwanted mobile scaling/scrolling gestures */
+      touch-action: none;
       margin: 0;
       padding: 0;
     }
@@ -60,7 +60,7 @@
     <canvas id="gameCanvas" width="960" height="540"></canvas>
   </div>
   <div id="instructions">
-    [SPACE / CLICK] Launch & Boost | [S] Store | [D] Cheat Currencies | Mobile Touch Optimized
+    [SPACE / CLICK] Launch & Boost | [S] Store | [D] Cheat Currencies | All Boosts Rewarded Ads Active
   </div>
 
   <script>
@@ -489,8 +489,8 @@
     ];
 
     const BOOST_UPGRADES = [
-      { id: "power", name: "Cannon Nitro (+15% Launch)", basePrice: 15, maxLevel: 5, desc: "Increases initial launch velocity." },
-      { id: "bounciness", name: "Super Spring (+20% Bounce)", basePrice: 20, maxLevel: 5, desc: "Preserves more momentum when bouncing." }
+      { id: "power", name: "Cannon Nitro (+15% Launch)", maxLevel: 5, desc: "Increases initial launch velocity." },
+      { id: "bounciness", name: "Super Spring (+20% Bounce)", maxLevel: 5, desc: "Preserves more momentum when bouncing." }
     ];
 
     function getSelectedChar() {
@@ -1021,14 +1021,14 @@
             const rowY = 150 + idx * 75;
             const btnX = canvas.width - 290;
             const curLevel = upgrades[up.id] || 0;
-            const price = up.basePrice * (curLevel + 1);
 
             if (py >= 140 && py <= 455 && adjustedPy >= rowY + 12 && adjustedPy <= rowY + 52 && px >= btnX && px <= btnX + 110) {
-              if (curLevel < up.maxLevel && totalDiamonds >= price) {
-                totalDiamonds -= price;
-                upgrades[up.id] = curLevel + 1;
-                saveEconomy();
-                AudioEngine.playTone(600, "sine", 0.3, 1200);
+              if (curLevel < up.maxLevel) {
+                PortalSDK.requestRewarded(() => {
+                  upgrades[up.id] = curLevel + 1;
+                  saveEconomy();
+                  AudioEngine.playTone(800, "sine", 0.3, 1400);
+                });
               }
             }
           });
@@ -1771,7 +1771,7 @@
         ctx.textAlign = "left";
       }
 
-      // Shop Modal
+      // Shop Modal with All-Ads Boosts
       if (gameState === "shop") {
         ctx.fillStyle = "rgba(2, 6, 23, 0.96)";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1950,7 +1950,6 @@
             const rowY = 150 + idx * 75;
             const curLevel = upgrades[up.id] || 0;
             const isMax = curLevel >= up.maxLevel;
-            const price = up.basePrice * (curLevel + 1);
 
             ctx.fillStyle = "#0f172a";
             safeRoundRect(ctx, 160, rowY, 640, 64, 10);
@@ -1975,13 +1974,13 @@
               ctx.font = "bold 13px -apple-system, sans-serif";
               ctx.fillText("MAXED", btnX + 55, rowY + 36);
             } else {
-              ctx.fillStyle = totalDiamonds >= price ? "#10b981" : "#334155";
+              ctx.fillStyle = "#38bdf8";
               safeRoundRect(ctx, btnX, rowY + 12, 110, 38, 8);
               ctx.fill();
-              ctx.fillStyle = "#fff";
+              ctx.fillStyle = "#0f172a";
               ctx.textAlign = "center";
-              ctx.font = "bold 13px -apple-system, sans-serif";
-              ctx.fillText(`◆ ${price}`, btnX + 55, rowY + 36);
+              ctx.font = "bold 12px -apple-system, sans-serif";
+              ctx.fillText("WATCH AD", btnX + 55, rowY + 36);
             }
           });
 
